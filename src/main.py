@@ -9,18 +9,19 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
-from routers import sec
-from sample_data import DB_LONDON_VALUES
-from db import engine, LOCATIONS_TABLE_NAME, init_postgis, init_db
+from db_ import engine, LOCATIONS_TABLE_NAME, init_postgis, init_db, create_spatial_indexes, insert_location_data, \
+    USERS_TABLE_NAME
+from sec import create_initial_user, currUserDep, router as sec_router
 
 logging.basicConfig(level=logging.DEBUG,
                     format="%(asctime)s %(levelname)-8s %(module)s:%(funcName)s:%(lineno)d - %(message)s")
 log = logging.getLogger(__name__)
 
 app = FastAPI(debug=True)
-app.include_router(sec.router)
+app.include_router(sec_router)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
 
 class LocationUpdate(BaseModel):
     user_id: str
@@ -28,8 +29,21 @@ class LocationUpdate(BaseModel):
     longitude: float
 
 
-@app.post("/update_location")
-def update_location(location: LocationUpdate):
+@app.get("/users")
+def get_all_users():
+    with SessionLocal() as session:
+        query = text(f"""SELECT user_id, ST_AsText(location) AS point FROM {LOCATIONS_TABLE_NAME};""")
+        result = session.execute(query).fetchall()
+        users = [{"user_id": row[0], "point": row[1]} for row in result]
+
+    return users
+
+
+@app.post("/locations")
+def update_location(location: LocationUpdate, current_user: currUserDep):
+    if location.user_id != current_user.user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     with SessionLocal() as session:
         stmt = text(f"""
         INSERT INTO {LOCATIONS_TABLE_NAME} (user_id, location, last_updated)
@@ -51,18 +65,12 @@ def update_location(location: LocationUpdate):
         return {"status": "success", "latitude": location.latitude, "longitude": location.longitude}
 
 
-@app.get("/users")
-def get_all_users():
-    with SessionLocal() as session:
-        query = text(f"""SELECT user_id, ST_AsText(location) AS point FROM {LOCATIONS_TABLE_NAME};""")
-        result = session.execute(query).fetchall()
-        users = [{"user_id": row[0], "point": row[1]} for row in result]
+@app.get("/locations/nearby_users")
+def get_nearby_users(user_id: str, max_distance: float = 6.0, current_user: currUserDep = None) -> List[
+    Dict[str, object]]:
+    if current_user.user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
 
-    return users
-
-
-@app.get("/nearby_users")
-def get_nearby_users(user_id: str, max_distance: float = 6.0) -> List[Dict[str, object]]:
     with SessionLocal() as session:
         # check exists
         query = text(f"SELECT EXISTS(SELECT 1 FROM {LOCATIONS_TABLE_NAME} WHERE user_id = :user_id)")
@@ -194,40 +202,23 @@ async def update_intersection_result(session_id: str, request: IntersectionUpdat
 ###########
 
 
-def create_spatial_indexes():
-    """Create optimized spatial indexes"""
-    with engine.connect() as conn:
-        conn.execute(text(f"""
-        CREATE INDEX IF NOT EXISTS idx_{LOCATIONS_TABLE_NAME}_geometry 
-        ON {LOCATIONS_TABLE_NAME} USING GIST (location);
-        """))
-        conn.execute(text(f"""
-        CREATE INDEX IF NOT EXISTS idx_{LOCATIONS_TABLE_NAME}_geography 
-        ON {LOCATIONS_TABLE_NAME} USING GIST ((location::geography));
-        """))
-
-        conn.commit()
-
-
-def insert_data():
-    """Insert sample data"""
-    log.info("inserting sample data (London)")
-    with SessionLocal() as session:
-        # insert or update
-        q = text(f""" INSERT INTO {LOCATIONS_TABLE_NAME} (user_id, location, last_updated) 
-                    VALUES {DB_LONDON_VALUES}
-                    ON CONFLICT (user_id)
-                    DO UPDATE SET 
-                        location = EXCLUDED.location,
-                        last_updated = EXCLUDED.last_updated;
-                """)
-        session.execute(q)
-        session.commit()
-
-
 if __name__ == "__main__":
     init_postgis()
     init_db()
     create_spatial_indexes()
-    insert_data()
+    insert_location_data()
+
+    # get all usernames, add password to missing users
+    with SessionLocal() as session:
+        q = text(f"""SELECT user_id FROM {LOCATIONS_TABLE_NAME};""")
+        result = session.execute(q)
+        user_ids = [row.user_id for row in result]
+        q = text(f"""SELECT user_id FROM {USERS_TABLE_NAME};""")
+        result = session.execute(q)
+        user_ids_with_pw = [row.user_id for row in result]
+        for user_id in user_ids:
+            if user_id not in user_ids_with_pw:
+                create_initial_user(user_id=user_id, password="secret")
+        # session.commit()
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

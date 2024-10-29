@@ -13,17 +13,45 @@ from client_display_map import create_map_html
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
+SERVER_URL = "http://localhost:8000"
+
 
 class LocationClient:
-    def __init__(self, server_url="http://localhost:8000", user_id=None, epsilon=1.1):
+    def __init__(self, server_url=SERVER_URL, user_id=None, epsilon=1.1):
         self.server_url = server_url
         self.user_id = user_id
         self.epsilon = epsilon
         self.mechanism = Noise(epsilon=epsilon, rmax=3)
+        self.access_token = self._get_access_token()
+        self.headers = {"Content-Type": "application/json",
+                        "accept": "application/json",
+                        "Authorization": f"Bearer {self.access_token}"
+                        }
+
+    def _get_access_token(self, password: str = "secret"):
+        url = f"{SERVER_URL}/login_for_access_token"
+        headers = {
+            "accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+        data = {
+            "username": self.user_id,
+            "password": password
+        }
+        response = requests.post(url, headers=headers, data=data)
+
+        if not response.ok:
+            print(response.json())
+            raise ValueError("Error getting access token")
+
+        token = response.json()["access_token"]
+        log.info(f"user '{self.user_id}' generated access token")
+        return token
 
     def update_location(self, latitude: float, longitude: float):
         """send location update to server. adds noise to location before sending"""
-        endpoint = f"{self.server_url}/update_location"
+        log.info(f"update location for user '{self.user_id}'")
+        endpoint = f"{self.server_url}/locations"
 
         # add noise
         noisy_latitude, noisy_longitude = self._add_noise(latitude, longitude)
@@ -39,7 +67,7 @@ class LocationClient:
         }
 
         try:
-            response = requests.post(endpoint, json=data)
+            response = requests.post(endpoint, json=data, headers=self.headers)
             if not response.ok:
                 print(f"response: {response.json()}")
             response.raise_for_status()
@@ -49,14 +77,16 @@ class LocationClient:
             return None
 
     def _add_noise(self, latitude, longitude):
+        log.info(f"add noise to location")
         return self.mechanism.add_noise(latitude, longitude)
 
     def get_nearby_users(self, max_distance_km: float = 6.0):
         """get users within specified distance (km)"""
-        endpoint = f"{self.server_url}/nearby_users/?user_id={self.user_id}"
+        log.info(f"get nearby users for user '{self.user_id}'")
+        endpoint = f"{self.server_url}/locations/nearby_users/?user_id={self.user_id}"
         params = {"max_distance": max_distance_km}
         try:
-            response = requests.get(endpoint, params=params)
+            response = requests.get(endpoint, params=params, headers=self.headers)
             if not response.ok:
                 print(f"response: {response.json()}")
             response.raise_for_status()
@@ -194,8 +224,7 @@ class PSIClient:
 
 
 class InitiatorClient(PSIClient):
-    def initiate(self, items: List[str]) -> str:
-
+    def initiate(self, items: List[str]) -> str: # step 1
         self.items = items
         blinded_values = [self._hash_and_blind(x) for x in items]
 
@@ -209,11 +238,11 @@ class InitiatorClient(PSIClient):
             raise ValueError("Error initiating PSI")
 
         session_id = response.json()["session_id"]
-        log.info(f"{self.user_id} initiated PSI {session_id} with {len(items)} items")
+        log.info(f"user '{self.user_id}' initiated PSI {session_id} with {len(items)} items (step 1)")
         return session_id
 
     def compute_intersection(self, session_id: str):
-        log.info(f"{self.user_id} compute intersection for session {session_id}")
+        log.info(f"'{self.user_id}' compute intersection for session {session_id} (step 3)")
         intersections = {}
 
         with requests.Session() as requests_session:
@@ -256,10 +285,10 @@ class InitiatorClient(PSIClient):
 
 
 class JoinerClient(PSIClient):
-    def join(self, session_id: str, items: List[str]) -> None:
+    def join(self, session_id: str, items: List[str]) -> None: # step 2
         """ process initiator's values and sending response."""
         self.items = items
-        log.info(f"{self.user_id} join PSI {session_id} with {len(items)} items")
+        log.info(f"user '{self.user_id}' join PSI {session_id} with {len(items)} items (step 2)")
 
         # get initiator's blinded values
         response = requests.get(f"{self.server_url}/psi/{session_id}")
@@ -288,39 +317,39 @@ class JoinerClient(PSIClient):
 
 
 if __name__ == "__main__":
-    big_ben_coords = (51.5007, -0.1246)  # true location
-    wembley_coords = (51.5580, -0.2765)
-    greenwich_coords = (51.4822, -0.0055)
+    big_ben_coords = (51.5007, -0.1246)  # true location. user "big_ben"
+    wembley_coords = (51.5580, -0.2765)  # true location. user "wembley"
+    greenwich_coords = (51.4822, -0.0055)  # true location. user "greenwich"
 
     ### init user, update location, get nearby users
     coords = big_ben_coords
     user_id = "big_ben"
     client = LocationClient(user_id=user_id)
+    # print(client.access_token)
     update_resp = client.update_location(*coords)  # this adds noise before sending to server
     nearby_users = client.get_nearby_users()
-    print(f"total nearby_users: {len(nearby_users)}\n{nearby_users}")
+    print(f"\ntotal nearby_users: {len(nearby_users)}\n{nearby_users}")
 
     #### open html map in browser, displaying true and user noisy location
-    # import webbrowser
-    # true_location = coords
-    # noisy_location = update_resp["latitude"], update_resp["longitude"]
-    # fname = create_map_html(true_location, noisy_location)
-    # webbrowser.open("map.html")
-    #
-    # #### psi
-    # other_user_id = nearby_users[0]["user_id"]  # closest user
-    #
-    # user_interests = ["sports", "books", "music", "movies", "programming", "nature"]
-    # other_user_interests = ["music", "travel", "movies", "nature", "food"]
-    #
-    # alice = InitiatorClient(user_id=user_id)
-    # session_id = alice.initiate(user_interests)
-    #
-    # bob = JoinerClient(user_id=other_user_id)
-    # bob.join(session_id, other_user_interests)  # todo: joiner receives session_id from server/initiator
-    #
-    # intersections = alice.compute_intersection(session_id)
-    # print(f"intersections: {intersections}")
+    import webbrowser
+    true_location = coords
+    noisy_location = update_resp["latitude"], update_resp["longitude"]
+    fname = create_map_html(true_location, noisy_location)
+    webbrowser.open("map.html")
+
+    ##### psi
+    other_user_id = nearby_users[0]["user_id"]  # closest user
+
+    user_interests = ["sports", "books", "music", "movies", "programming", "nature"]
+    other_user_interests = ["music", "travel", "movies", "nature", "food"]
+
+    alice = InitiatorClient(user_id=user_id)
+    session_id = alice.initiate(user_interests)
+
+    bob = JoinerClient(user_id=other_user_id)
+    bob.join(session_id, other_user_interests)  # future feature: joiner receives session_id from server/initiator
+
+    intersections = alice.compute_intersection(session_id)
+    print(f"intersections: {intersections}")
 
     # Util.distribution_example(1000, epsilon=1.1, rmax=3)
-

@@ -1,10 +1,11 @@
 """
-based on fastapi docs https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt
+based on fastapi docs https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt but with db
 """
-
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
+import bcrypt
 import jwt
 from fastapi import APIRouter
 from fastapi import Depends, HTTPException, status
@@ -12,22 +13,27 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 from pydantic import BaseModel
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import sessionmaker
+
+from db_ import engine, UserDB
+
+
+@dataclass
+class SolveBugBcryptWarning:
+    # https://github.com/pyca/bcrypt/issues/684
+    __version__: str = getattr(bcrypt, "__version__")
+
+
+setattr(bcrypt, "__about__", SolveBugBcryptWarning())
 
 # get rand string: openssl rand -hex 32
 SECRET_KEY = "33e07a088f7151c808c149eb2485191d138a56983730487d13d93acfdc276804"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Username: london, Password: secret
-users_db = {
-    "johndoe": {
-        "username": "london",
-        "hashed_password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",
-        "disabled": False,
-    }
-}
-
 router = APIRouter()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 class Token(BaseModel):
@@ -51,30 +57,26 @@ class UserInDB(User):
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login_for_access_token")
 
+
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-def get_user(db, username: str):
-    """get user from db, by username"""
-    if username in db:
-        user_dict = db[username]
-        return UserInDB(**user_dict)
+
+def get_user(user_id: str):
+    with SessionLocal() as session:
+        user = session.query(UserDB).filter(UserDB.user_id == user_id).first()
+        return user
 
 
-def authenticate_user(username: str, password: str, db=users_db):
+
+def authenticate_user(user_id: str, password: str):
     def verify_password(plain_password, hashed_password):
         """verify if a received password matches the hash stored"""
         return pwd_context.verify(plain_password, hashed_password)
 
-    # get user from db
-    user = get_user(db, username)
-    if not user:
-        return False
-
-    # verify password vs db hash
-    if not verify_password(password, user.hashed_password):
-        return False
-
+    user = get_user(user_id)
+    if not user or not verify_password(password, user.hashed_password):
+        return None
     return user
 
 
@@ -108,7 +110,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])  # decode token, using secret key
 
-        username: str = payload.get("sub")  # sub is the subject of the token, which in this case is the user's username
+        username: str = payload.get("sub")  # sub is the subject of the token, in this case the user's username
         if username is None:
             raise credentials_exception
 
@@ -117,7 +119,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
         raise credentials_exception
 
     # user from db
-    user = get_user(users_db, username=token_data.username)
+    user = get_user(user_id=token_data.username)
     if user is None:
         raise credentials_exception
 
@@ -140,9 +142,10 @@ async def get_current_active_user(current_user: Annotated[User, Depends(get_curr
 currUserDep = Annotated[User, Depends(get_current_active_user)]
 
 
-@router.post("/login_for_access_token/", response_model=Token)  # path same as tokenUrl in OAuth2PasswordBearer
-async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], ) -> Token:
-    user = authenticate_user(form_data.username, form_data.password, users_db)
+@router.post("/login_for_access_token", response_model=Token)  # path same as tokenUrl in OAuth2PasswordBearer
+async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> Token:
+
+    user = authenticate_user(form_data.username, form_data.password)
 
     if not user:
         raise HTTPException(
@@ -152,16 +155,32 @@ async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm,
         )
 
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(data={"sub": user.username}, expires_delta=access_token_expires)
+    access_token = create_access_token(data={"sub": user.user_id}, expires_delta=access_token_expires)
 
     return Token(access_token=access_token, token_type="bearer")
 
 
-@router.get("/users/me/", response_model=User)
-async def read_users_me(current_user: currUserDep, ):
-    return current_user
+@router.get("/users/me/")
+async def read_users_me(current_user: currUserDep):
+    return {"user_id": current_user.user_id, "disabled": current_user.disabled}
 
 
-@router.get("/users/me/items/")
-async def read_own_items(current_user: currUserDep, ):
-    return [{"item_id": "Foo", "owner": current_user.username}]
+#############
+def create_initial_user(user_id: str, password: str):
+    hashed_password = get_password_hash(password)
+
+    user_data = {
+        "user_id": user_id,
+        "hashed_password": hashed_password,
+        "disabled": False
+    }
+
+    stmt = insert(UserDB).values(**user_data).on_conflict_do_update(
+        index_elements=["user_id"],
+        set_={"hashed_password": hashed_password, "disabled": False}
+    )
+    with SessionLocal() as session:
+        session.execute(stmt)
+        session.commit()
+
+        # return session.query(UserDB).filter_by(user_id=user_id).first()

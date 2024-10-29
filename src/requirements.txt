@@ -9,3 +9,6 @@ GeoAlchemy2
 psycopg[binary]
 scipy
 geopy
+
+# optional:
+matplotlib
