@@ -1,9 +1,10 @@
 import logging
 import os
-from datetime import datetime
+import time
+from datetime import datetime, UTC
 
 from geoalchemy2 import Geometry
-from sqlalchemy import create_engine, Column, String, DateTime, text, Boolean
+from sqlalchemy import create_engine, Column, String, DateTime, text, Boolean, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from sample_data import DB_LONDON_VALUES
@@ -28,14 +29,6 @@ LOCATIONS_TABLE_NAME = "user_locations"
 USERS_TABLE_NAME = "users"
 
 
-class UserLocation(Base):
-    __tablename__ = LOCATIONS_TABLE_NAME
-
-    user_id = Column(String, primary_key=True, index=True)
-    location = Column(Geometry('POINT', srid=4326))
-    last_updated = Column(DateTime, default=datetime.utcnow)
-
-
 class UserDB(Base):
     __tablename__ = USERS_TABLE_NAME
 
@@ -44,21 +37,43 @@ class UserDB(Base):
     disabled = Column(Boolean, default=False)
 
 
-def init_postgis():
+class UserLocation(Base):
+    __tablename__ = LOCATIONS_TABLE_NAME
+
+    user_id = Column(String, ForeignKey(f"{USERS_TABLE_NAME}.user_id"), primary_key=True, index=True, )
+    location = Column(Geometry('POINT', srid=4326))
+    last_updated = Column(DateTime, default=datetime.now(UTC))
+
+
+def _init_postgis():
     """initialize PostGIS extension before creating tables"""
-    with engine.connect() as conn:
-        log.info("initialize PostGIS extension")
-        conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
-        conn.commit()
+    num_attempts = 3
+    sleep_time = 3
+    for i in range(num_attempts):
+        try:
+            with engine.connect() as conn:
+                log.info("initialize PostGIS extension")
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+                conn.commit()
+                break
+        except Exception as e:
+            if i == num_attempts - 1:
+                log.error(f"Error initializing PostGIS: {e}")
+                raise e
+            else:
+                log.info(f"sleep {sleep_time}s before retry db engine.connect()")
+                time.sleep(sleep_time)
 
 
 def init_db():
     """create all tables (will not attempt to recreate tables already present)"""
+    _init_postgis()
     log.info("create tables")
     Base.metadata.create_all(bind=engine)
+    _create_spatial_indexes()
 
 
-def create_spatial_indexes():
+def _create_spatial_indexes():
     """Create optimized spatial indexes"""
     with engine.connect() as conn:
         conn.execute(text(f"""
@@ -77,7 +92,7 @@ def insert_location_data():
     """Insert sample data"""
     log.info("inserting sample data (London)")
     with SessionLocal() as session:
-        # insert or update
+        # insert or update location data
         q = text(f""" INSERT INTO {LOCATIONS_TABLE_NAME} (user_id, location, last_updated) 
                     VALUES {DB_LONDON_VALUES}
                     ON CONFLICT (user_id)

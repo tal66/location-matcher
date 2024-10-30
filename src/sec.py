@@ -166,7 +166,7 @@ async def read_users_me(current_user: currUserDep):
 
 
 #############
-def create_initial_user(user_id: str, password: str):
+def create_initial_user(user_id: str, password: str, session):
     hashed_password = get_password_hash(password)
 
     user_data = {
@@ -179,8 +179,4 @@ def create_initial_user(user_id: str, password: str):
         index_elements=["user_id"],
         set_={"hashed_password": hashed_password, "disabled": False}
     )
-    with SessionLocal() as session:
-        session.execute(stmt)
-        session.commit()
-
-        # return session.query(UserDB).filter_by(user_id=user_id).first()
+    session.execute(stmt)

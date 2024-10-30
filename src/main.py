@@ -9,9 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
-from db_ import engine, LOCATIONS_TABLE_NAME, init_postgis, init_db, create_spatial_indexes, insert_location_data, \
-    USERS_TABLE_NAME
+from db_ import engine, LOCATIONS_TABLE_NAME, init_db, insert_location_data, USERS_TABLE_NAME
 from sec import create_initial_user, currUserDep, router as sec_router
+
+from sample_data import DB_LONDON_VALUES
 
 logging.basicConfig(level=logging.DEBUG,
                     format="%(asctime)s %(levelname)-8s %(module)s:%(funcName)s:%(lineno)d - %(message)s")
@@ -203,22 +204,25 @@ async def update_intersection_result(session_id: str, request: IntersectionUpdat
 
 
 if __name__ == "__main__":
-    init_postgis()
     init_db()
-    create_spatial_indexes()
-    insert_location_data()
 
     # get all usernames, add password to missing users
+    sample_user_ids = []
+    for line in DB_LONDON_VALUES.strip().splitlines():
+        u = line.split(",")[0].strip("'")
+        u = u.replace("('", "").strip()
+        if u:
+            sample_user_ids.append(u)
+
+    log.info(f"insert {sample_user_ids} initial users")
     with SessionLocal() as session:
-        q = text(f"""SELECT user_id FROM {LOCATIONS_TABLE_NAME};""")
-        result = session.execute(q)
-        user_ids = [row.user_id for row in result]
         q = text(f"""SELECT user_id FROM {USERS_TABLE_NAME};""")
         result = session.execute(q)
         user_ids_with_pw = [row.user_id for row in result]
-        for user_id in user_ids:
+        for user_id in sample_user_ids:
             if user_id not in user_ids_with_pw:
-                create_initial_user(user_id=user_id, password="secret")
-        # session.commit()
+                create_initial_user(user_id=user_id, password="secret", session=session)
+        session.commit()
 
+    insert_location_data()
     uvicorn.run(app, host="0.0.0.0", port=8000)
