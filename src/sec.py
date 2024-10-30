@@ -1,6 +1,7 @@
 """
 based on fastapi docs https://fastapi.tiangolo.com/tutorial/security/oauth2-jwt but with db
 """
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -28,7 +29,8 @@ class SolveBugBcryptWarning:
 setattr(bcrypt, "__about__", SolveBugBcryptWarning())
 
 # get rand string: openssl rand -hex 32
-SECRET_KEY = "33e07a088f7151c808c149eb2485191d138a56983730487d13d93acfdc276804"
+SECRET_KEY = os.getenv("SECRET_KEY", None)
+SECRET_KEY = (SECRET_KEY or "33e07a088f7151c808c149eb2485191d138a56983730487d13d93acfdc276804")  # test key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -66,7 +68,6 @@ def get_user(user_id: str):
     with SessionLocal() as session:
         user = session.query(UserDB).filter(UserDB.user_id == user_id).first()
         return user
-
 
 
 def authenticate_user(user_id: str, password: str):
@@ -144,7 +145,6 @@ currUserDep = Annotated[User, Depends(get_current_active_user)]
 
 @router.post("/login_for_access_token", response_model=Token)  # path same as tokenUrl in OAuth2PasswordBearer
 async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]) -> Token:
-
     user = authenticate_user(form_data.username, form_data.password)
 
     if not user:

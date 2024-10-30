@@ -3,12 +3,6 @@ numpy
 pyjwt
 fastapi[standard]
 passlib[bcrypt]
-
 SQLAlchemy
 GeoAlchemy2
 psycopg[binary]
-scipy
-geopy
-
-# optional:
-matplotlib

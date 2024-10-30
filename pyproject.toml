@@ -1,0 +1,12 @@
+[project]
+name = "location-match"
+version = "1.1.0"
+requires-python = ">= 3.12"
+dependencies = [
+    "requests",
+    "numpy"
+]
+
+[project.optional-dependencies]
+client = ["geopy", "scipy", "matplotlib"] # if docker server
+server = ["fastapi[standard]", "pyjwt", "passlib[bcrypt]", "SQLAlchemy", "GeoAlchemy2", "psycopg[binary]"]

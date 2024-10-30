@@ -1,7 +1,6 @@
 # simple map ui, no server
 
 
-
 def create_map_html(true_location, noisy_location):
     tile_str = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
 
@@ -50,8 +49,8 @@ def create_map_html(true_location, noisy_location):
     <div id="map"></div>
     <div class="legend">
         <strong>Legend:</strong><br>
-        <span style="color:blue;">● True Location</span><br>
-        <span style="color:black;">● Noisy Location</span>
+        <span style="color:black;">● True Location</span><br>
+        <span style="color:blue;">● Noisy Location</span>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
@@ -84,8 +83,7 @@ def create_map_html(true_location, noisy_location):
         // Noisy Location Marker
         L.marker([{noisy_location[0]}, {noisy_location[1]}], {{ icon: noisyMarker }}).addTo(map)
             .bindPopup(`<strong>Noisy Location</strong><br>Lat: {noisy_location[0]}<br>Lng: {noisy_location[1]}`);
-        
-        
+
     </script>
     </body>
     </html>
@@ -97,29 +95,3 @@ def create_map_html(true_location, noisy_location):
         f.write(html_content)
 
     return f
-
-
-"""
-
-    // True Location Marker
-    L.marker([{true_location[0]}, {true_location[1]}], {{
-        icon: L.icon({{
-            iconUrl: 'https://leafletjs.com/examples/custom-icons/leaf-green.png',
-            iconSize: [38, 95],
-            iconAnchor: [19, 95]
-        }})
-    }}).addTo(map)
-        .bindPopup(`<strong>True Location</strong><br>Lat: {true_location[0]}<br>Lng: {true_location[1]}`);
-    
-    // Noisy Location Marker
-    L.marker([{noisy_location[0]}, {noisy_location[1]}], {{
-        icon: L.icon({{
-            iconUrl: 'https://leafletjs.com/examples/custom-icons/leaf-red.png',
-            iconSize: [38, 95],
-            iconAnchor: [19, 95]
-        }})
-    }}).addTo(map)
-        .bindPopup(`<strong>Noisy Location</strong><br>Lat: {noisy_location[0]}<br>Lng: {noisy_location[1]}`);
-
-
-"""
