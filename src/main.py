@@ -1,16 +1,15 @@
 import logging
-import uuid
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import List, Dict
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.orm import sessionmaker
 
-from db_ import engine, LOCATIONS_TABLE_NAME, init_db, insert_location_data, USERS_TABLE_NAME
+from db_ import LOCATIONS_TABLE_NAME, init_db, insert_location_data, USERS_TABLE_NAME, SessionLocal
 from sec import create_initial_user, currUserDep, router as sec_router
+from psi import router as psi_router
 
 from sample_data import DB_LONDON_VALUES
 
@@ -20,8 +19,7 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(debug=True)
 app.include_router(sec_router)
-
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+app.include_router(psi_router)
 
 
 class LocationUpdate(BaseModel):
@@ -40,7 +38,7 @@ def get_all_users():
     return users
 
 
-@app.post("/locations")
+@app.post("/locations", tags=["Locations"])
 def update_location(location: LocationUpdate, current_user: currUserDep):
     if location.user_id != current_user.user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -59,15 +57,16 @@ def update_location(location: LocationUpdate, current_user: currUserDep):
             'user_id': location.user_id,
             'latitude': location.latitude,
             'longitude': location.longitude,
-            'timestamp': datetime.utcnow()
+            'timestamp': datetime.now(UTC)
         })
         session.commit()
 
         return {"status": "success", "latitude": location.latitude, "longitude": location.longitude}
 
 
-@app.get("/locations/nearby_users")
-def get_nearby_users(user_id: str, max_distance: float = 6.0, current_user: currUserDep = None) -> List[
+# TODO: improve
+@app.get("/locations/nearby_users", tags=["Locations"])
+def get_nearby_users(user_id: str, max_distance: float = 5.0, current_user: currUserDep = None) -> List[
     Dict[str, object]]:
     if current_user.user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -111,96 +110,6 @@ def get_nearby_users(user_id: str, max_distance: float = 6.0, current_user: curr
         ]
 
         return nearby_users
-
-
-########### psi
-
-# in-memory storage for session messages
-user_sessions: Dict[str, Dict] = {}
-
-
-class InitiateRequest(BaseModel):
-    blinded_values: List[int]
-    user_id: str
-
-
-class JoinRequest(BaseModel):
-    session_id: str
-    response_values: List[int]
-    user_id: str
-
-
-class IntersectionUpdateRequest(BaseModel):
-    user_id: str
-    other_user_id: str
-    len_intersection: int
-
-
-@app.post("/psi/init", status_code=201)
-async def initiate_psi(request: InitiateRequest):
-    """store initiator's blinded values and create session."""
-    session_id = str(uuid.uuid4())
-    user_sessions[session_id] = {
-        "initiator_values": request.blinded_values,
-        "status": 1,
-        "user_id": request.user_id
-    }
-    return {"session_id": session_id}
-
-
-@app.post("/psi/{session_id}/join")
-async def join_psi(session_id: str, request: JoinRequest):
-    """store joiner's response values and update session status."""
-    session = user_sessions.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if session["status"] != 1:
-        raise HTTPException(status_code=400, detail="Invalid session status")
-
-    if not session.get("response_values"):
-        session["response_values"] = dict()
-    session["response_values"][request.user_id] = request.response_values
-
-    session["status"] = 2
-
-    return {"status": "join successful", "session_id": session_id}
-
-
-@app.get("/psi/{session_id}")
-async def get_values(session_id: str):
-    if session_id not in user_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    session = user_sessions[session_id]
-
-    if session["status"] == 1:
-        return {"values": session["initiator_values"], "status": 1}
-    elif session["status"] == 2:
-        return {"values": session["response_values"], "status": 2}
-
-    raise HTTPException(status_code=400, detail="Invalid session status")
-
-
-@app.patch("/psi/{session_id}/intersection")
-async def update_intersection_result(session_id: str, request: IntersectionUpdateRequest):
-    """update the number of intersections with other user"""
-    if session_id not in user_sessions:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    session = user_sessions[session_id]
-
-    if session["status"] != 2:
-        raise HTTPException(status_code=400, detail="Invalid session status")
-
-    if not session.get("intersection"):
-        session["intersection"] = dict()
-    session["intersection"][request.other_user_id] = request.len_intersection
-
-    return {"status": f"Intersection updated to {request.len_intersection}"}
-
-
-###########
 
 
 if __name__ == "__main__":

@@ -57,22 +57,32 @@ def create_map_html(true_location, noisy_location):
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
             crossorigin=""></script>
     <script>
-        // Initialize the map centered on the true location
+        // map centered on the true location
         const map = L.map('map').setView([{true_location[0]}, {true_location[1]}], 13);
 
-        // Add the base tile layer from OpenStreetMap
+        // base tile layer
         L.tileLayer('{tile_str}', {{
             maxZoom: 18,
-            attribution: '© OpenStreetMap contributors'
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }}).addTo(map);
 
-        // Add a circle around the true location (3 km radius)
-        L.circle([{true_location[0]}, {true_location[1]}], {{
+        // circle around noisy location (5 km radius)
+        L.circle([{noisy_location[0]}, {noisy_location[1]}], {{
             color: 'blue',
+            fillColor: 'blue',
+            fillOpacity: 0.3,
+            radius: 5000
+        }}).addTo(map);
+        
+        // circle around true location (3 km radius)
+        L.circle([{true_location[0]}, {true_location[1]}], {{
+            color: 'black',
             fillColor: '#30f',
             fillOpacity: 0.5,
             radius: 3000
         }}).addTo(map);
+        
+        
         
         {custom}
         

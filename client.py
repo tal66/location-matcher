@@ -16,37 +16,38 @@ log = logging.getLogger(__name__)
 SERVER_URL = "http://localhost:8000"
 
 
+def _get_access_token(user_id, password: str = "secret"):
+    url = f"{SERVER_URL}/login_for_access_token"
+    headers = {
+        "accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    data = {
+        "username": user_id,
+        "password": password
+    }
+    response = requests.post(url, headers=headers, data=data)
+
+    if not response.ok:
+        print(response.json())
+        raise ValueError("Error getting access token")
+
+    token = response.json()["access_token"]
+    log.info(f"user '{user_id}' generated access token")
+    return token
+
+
 class LocationClient:
     def __init__(self, server_url=SERVER_URL, user_id=None, epsilon=1.1):
         self.server_url = server_url
         self.user_id = user_id
         self.epsilon = epsilon
         self.mechanism = Noise(epsilon=epsilon, rmax=3)
-        self.access_token = self._get_access_token()
+        self.access_token = _get_access_token(user_id)
         self.headers = {"Content-Type": "application/json",
                         "accept": "application/json",
                         "Authorization": f"Bearer {self.access_token}"
                         }
-
-    def _get_access_token(self, password: str = "secret"):
-        url = f"{SERVER_URL}/login_for_access_token"
-        headers = {
-            "accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        data = {
-            "username": self.user_id,
-            "password": password
-        }
-        response = requests.post(url, headers=headers, data=data)
-
-        if not response.ok:
-            print(response.json())
-            raise ValueError("Error getting access token")
-
-        token = response.json()["access_token"]
-        log.info(f"user '{self.user_id}' generated access token")
-        return token
 
     def update_location(self, latitude: float, longitude: float):
         """send location update to server. adds noise to location before sending"""
@@ -213,6 +214,11 @@ class PSIClient:
         self.blinding_factor = random.randint(1, (p - 1) // 2 - 1)
         self.items = []
         self.user_id = user_id
+        self.access_token = _get_access_token(user_id)
+        self.headers = {"Content-Type": "application/json",
+                        "accept": "application/json",
+                        "Authorization": f"Bearer {self.access_token}"
+                        }
 
     def _hash_and_blind(self, item: str) -> int:
         h = hashlib.sha256(item.encode()).digest()
@@ -224,12 +230,12 @@ class PSIClient:
 
 
 class InitiatorClient(PSIClient):
-    def initiate(self, items: List[str]) -> str: # step 1
+    def initiate(self, items: List[str]) -> str:  # step 1
         self.items = items
         blinded_values = [self._hash_and_blind(x) for x in items]
 
         response = requests.post(
-            f"{self.server_url}/psi/init",
+            f"{self.server_url}/psi/init", headers=self.headers,
             json={"blinded_values": blinded_values, "user_id": self.user_id}
         )
 
@@ -246,12 +252,12 @@ class InitiatorClient(PSIClient):
         intersections = {}
 
         with requests.Session() as requests_session:
-            response = requests_session.get(f"{self.server_url}/psi/{session_id}")
+            response = requests_session.get(f"{self.server_url}/psi/{session_id}", headers=self.headers)
             if not response.ok:
                 print(response.json())
                 raise ValueError("Error computing intersection")
             if response.json()["status"] != 2:
-                raise ValueError("Invalid session status (not 2)")
+                raise ValueError(f"Invalid session status {response.json()["status"]} (not 2)")
 
             response_values = response.json()["values"]
 
@@ -273,7 +279,7 @@ class InitiatorClient(PSIClient):
 
                 # update server with intersection result
                 requests_session.patch(
-                    f"{self.server_url}/psi/{session_id}/intersection",
+                    f"{self.server_url}/psi/{session_id}/intersection", headers=self.headers,
                     json={
                         "user_id": self.user_id,
                         "other_user_id": user,
@@ -285,13 +291,13 @@ class InitiatorClient(PSIClient):
 
 
 class JoinerClient(PSIClient):
-    def join(self, session_id: str, items: List[str]) -> None: # step 2
+    def join(self, session_id: str, items: List[str]) -> None:  # step 2
         """ process initiator's values and sending response."""
         self.items = items
         log.info(f"user '{self.user_id}' join PSI {session_id} with {len(items)} items (step 2)")
 
         # get initiator's blinded values
-        response = requests.get(f"{self.server_url}/psi/{session_id}")
+        response = requests.get(f"{self.server_url}/psi/{session_id}", headers=self.headers)
         if not response.ok:
             print(response.json())
             raise ValueError("Error joining PSI")
@@ -306,14 +312,19 @@ class JoinerClient(PSIClient):
 
         # response
         response_values = blinded_y + double_blinded_x
-        requests.post(
+        res = requests.post(
             f"{self.server_url}/psi/{session_id}/join",
+            headers=self.headers,
             json={
                 "session_id": session_id,
                 "response_values": response_values,
                 "user_id": self.user_id
             }
         )
+
+        if not res.ok:
+            print(res.json())
+            raise ValueError("Error joining PSI")
 
 
 if __name__ == "__main__":
@@ -346,8 +357,10 @@ if __name__ == "__main__":
     alice = InitiatorClient(user_id=user_id)
     session_id = alice.initiate(user_interests)
 
-    bob = JoinerClient(user_id=other_user_id)
-    bob.join(session_id, other_user_interests)  # future feature: joiner receives session_id from server/initiator
+    # joiner
+    # future feature: joiner receives session_id from server/initiator
+    joiner = JoinerClient(user_id=other_user_id)
+    joiner.join(session_id, other_user_interests)
 
     intersections = alice.compute_intersection(session_id)
     print(f"intersections: {intersections}")

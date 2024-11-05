@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
+import logging
 
 import bcrypt
 import jwt
@@ -19,6 +20,7 @@ from sqlalchemy.orm import sessionmaker
 
 from db_ import engine, UserDB
 
+log = logging.getLogger(__name__)
 
 @dataclass
 class SolveBugBcryptWarning:
@@ -113,15 +115,18 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 
         username: str = payload.get("sub")  # sub is the subject of the token, in this case the user's username
         if username is None:
+            log.error(f"username not found in token")
             raise credentials_exception
 
         token_data = TokenData(username=username)
     except InvalidTokenError:
+        log.error(f"invalid token")
         raise credentials_exception
 
     # user from db
     user = get_user(user_id=token_data.username)
     if user is None:
+        log.error(f"user not found in db: {token_data.username}")
         raise credentials_exception
 
     return user
@@ -130,7 +135,6 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
 async def get_current_active_user(current_user: Annotated[User, Depends(get_current_user)], ):
     if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
-
     return current_user
 
 
