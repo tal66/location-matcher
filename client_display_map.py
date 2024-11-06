@@ -1,7 +1,24 @@
 # simple map ui, no server
 
 
-def create_map_html(true_location, noisy_location):
+def create_map_html(true_location, noisy_location, nearby_users=None):
+    nearby_users_points = []
+    if nearby_users:
+        for user in nearby_users:
+            s = f"""
+                var userMarker = L.marker([{user['location']['latitude']}, {user['location']['longitude']}], {{ icon: nearbyMarker }}).addTo(map)
+                    .bindPopup(`<strong>Nearby User</strong><br>User ID: {user['user_id']}<br>Distance: {user['distance']} km`);
+                userMarker.on('mouseover', function(e) {{
+                    info.update({{name: '{user['user_id']}', distance: '{user['distance']} km', user_id: '{user['user_id']}'}}); 
+                }});
+                userMarker.on('mouseout', function(e) {{
+                    info.update();
+                }});
+                """
+            nearby_users_points.append(s)
+    nearby_users_str = "\n".join(nearby_users_points)
+
+
     tile_str = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
 
     custom = """// Custom Marker Style
@@ -18,6 +35,14 @@ def create_map_html(true_location, noisy_location):
                     iconSize: [20, 20],
                     iconAnchor: [10, 20]
                 });
+                
+                var nearbyMarker = L.divIcon({
+                    className: 'custom-marker',
+                    html: '<div style="background: green; border-radius: 50%; width: 10px; height: 10px; border: 2px solid white;"></div>',
+                    iconSize: [20, 20],
+                    iconAnchor: [10, 20]
+                });
+                
             """
 
     html_content = f"""
@@ -39,19 +64,29 @@ def create_map_html(true_location, noisy_location):
                 width: 100%;
             }}
             .legend {{
-                background: white;
+                background: rgba(255, 255, 255, 0.8);
                 padding: 10px;
+                border-radius: 10px;
+            }}
+            .info {{
+                padding: 6px 8px;
+                font: 14px/16px Arial, Helvetica, sans-serif;
+                background: white;
+                background: rgba(255,255,255,0.8);
+                box-shadow: 0 0 15px rgba(0,0,0,0.2);
+                border-radius: 5px;
+                min-width: 180px;
+            }}
+            .info h4 {{
+                margin: 0 0 5px;
+                color: #777;
             }}
         </style>
     </head>
     <body>
 
     <div id="map"></div>
-    <div class="legend">
-        <strong>Legend:</strong><br>
-        <span style="color:black;">● True Location</span><br>
-        <span style="color:blue;">● Noisy Location</span>
-    </div>
+
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
@@ -66,7 +101,7 @@ def create_map_html(true_location, noisy_location):
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }}).addTo(map);
 
-        // circle around noisy location (5 km radius)
+        // circle around noisy location
         L.circle([{noisy_location[0]}, {noisy_location[1]}], {{
             color: 'blue',
             fillColor: 'blue',
@@ -82,8 +117,7 @@ def create_map_html(true_location, noisy_location):
             radius: 3000
         }}).addTo(map);
         
-        
-        
+
         {custom}
         
         // True Location Marker
@@ -93,6 +127,51 @@ def create_map_html(true_location, noisy_location):
         // Noisy Location Marker
         L.marker([{noisy_location[0]}, {noisy_location[1]}], {{ icon: noisyMarker }}).addTo(map)
             .bindPopup(`<strong>Noisy Location</strong><br>Lat: {noisy_location[0]}<br>Lng: {noisy_location[1]}`);
+        
+        // Nearby Users
+        {nearby_users_str}
+        
+        L.control.scale({{position:'bottomright', metric: true, imperial: false}}).addTo(map);
+        
+        // legend
+        var legend = L.control({{position: 'topright'}});
+        legend.onAdd = function (map) {{
+            var div = L.DomUtil.create('div', 'info legend');
+            div.innerHTML = `
+                <strong>Legend:</strong><br>
+                <span style="color:black;">● True Location</span><br>
+                <span style="color:blue;">● Noisy Location</span><br>
+                <span style="color:green;">● Nearby User</span
+            `;
+            return div;
+        }};
+        legend.addTo(map);
+        
+        
+        // Custom Info Control    
+        var info = L.control();
+        info.onAdd = function (map) {{
+            this._div = L.DomUtil.create('div', 'info'); // create a div with a class "info"
+            this.update();
+            return this._div;
+        }};
+
+        // method that we will use to update the control based on feature properties passed
+        info.update = function (props) {{
+            this._div.innerHTML = '<h4>Nearby User Info</h4>' +  (props ?
+                '<b>' + props.name + '</b><br/>' + props.distance + ' (from noisy location)'
+                : 'Hover over a green point');
+        }};
+        
+        function highlightFeature(e) {{
+            info.update(layer.feature.properties);
+        }}
+        
+        function resetHighlight(e) {{
+            info.update();
+        }}
+
+        info.addTo(map);
 
     </script>
     </body>
@@ -100,8 +179,8 @@ def create_map_html(true_location, noisy_location):
     """
 
     # write to file
-    f = "map.html"
-    with open(f, "w", encoding="utf-8") as f:
+    filename = "map.html"
+    with open(filename, "w", encoding="utf-8") as f:
         f.write(html_content)
 
-    return f
+    return filename

@@ -81,7 +81,7 @@ class LocationClient:
         log.info(f"add noise to location")
         return self.mechanism.add_noise(latitude, longitude)
 
-    def get_nearby_users(self, max_distance_km: float = 6.0):
+    def get_nearby_users(self, max_distance_km: float = 5.0):
         """get users within specified distance (km)"""
         log.info(f"get nearby users for user '{self.user_id}'")
         endpoint = f"{self.server_url}/locations/nearby_users/?user_id={self.user_id}"
@@ -326,6 +326,13 @@ class JoinerClient(PSIClient):
             print(res.json())
             raise ValueError("Error joining PSI")
 
+    def get_intersection_len(self, session_id: str):
+        response = requests.get(f"{self.server_url}/psi/{session_id}/intersection", headers=self.headers)
+        if not response.ok:
+            print(response.json())
+            raise ValueError("Error getting intersection")
+        return response.json().get("intersection_len", -1)
+
 
 if __name__ == "__main__":
     big_ben_coords = (51.5007, -0.1246)  # true location. user "big_ben"
@@ -345,8 +352,9 @@ if __name__ == "__main__":
     import webbrowser
     true_location = coords
     noisy_location = update_resp["latitude"], update_resp["longitude"]
-    fname = create_map_html(true_location, noisy_location)
-    webbrowser.open("map.html")
+    fname = create_map_html(true_location, noisy_location, nearby_users)
+    print(f"open map in browser: {fname}")
+    webbrowser.open(fname)
 
     ##### psi
     other_user_id = nearby_users[0]["user_id"]  # closest user
@@ -364,5 +372,10 @@ if __name__ == "__main__":
 
     intersections = alice.compute_intersection(session_id)
     print(f"intersections: {intersections}")
+
+    # joiner sees num intersections
+    num_intersections = joiner.get_intersection_len(session_id)
+    print(f"num intersections: {num_intersections}")
+
 
     # Util.distribution_example(1000, epsilon=1.1, rmax=3)

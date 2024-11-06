@@ -13,7 +13,7 @@ Exact locations and interests remain confidential from the server (noise added b
 
 ### Features
 
-- Send location update (authentication required. All sample users are initialized with password=“secret”).
+- Send location update (authentication required. all sample users are initialized with password=“secret”).
 - Find nearby users (authentication required)
 - Visualize true location vs. the noisy location of current user.
 - 3-step process of finding private set intersection of interests between two nearby users (simple implementation)

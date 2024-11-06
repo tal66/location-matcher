@@ -144,5 +144,16 @@ async def update_intersection_result(session_id: str, request: IntersectionUpdat
 
     # update
     session.intersection[request.other_user_id] = request.len_intersection
+    session.status = SessionStatus.COMPLETED.value
 
     return {"status": f"Intersection updated to {request.len_intersection}"}
+
+
+@router.get("/{session_id}/intersection")
+async def get_intersection_result(session_id: str, current_user: currUserDep):
+    session = session_manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    n = session.intersection.get(current_user.user_id, -1)
+    return {"intersection_len": n}

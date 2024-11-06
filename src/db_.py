@@ -88,13 +88,13 @@ def _create_spatial_indexes():
         conn.commit()
 
 
-def insert_location_data():
+def insert_location_data(values: str = DB_LONDON_VALUES):
     """Insert sample data"""
-    log.info("inserting sample data (London)")
+    log.info("inserting sample data")
     with SessionLocal() as session:
         # insert or update location data
         q = text(f""" INSERT INTO {LOCATIONS_TABLE_NAME} (user_id, location, last_updated) 
-                    VALUES {DB_LONDON_VALUES}
+                    VALUES {values}
                     ON CONFLICT (user_id)
                     DO UPDATE SET 
                         location = EXCLUDED.location,
